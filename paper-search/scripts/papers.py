@@ -1,116 +1,191 @@
 #!/usr/bin/env python3
-"""papers.py — search scientific papers on official APIs and read their PDFs.
+"""papers.py — search official scholarly APIs and read a legal PDF.
 
 Subcommands:
-  search QUERY [--domain auto|ml|phys|math|bio|psy|chem|general] [--limit N]
-               [--year 2020-2023|2020:] [--sort relevance|citations|date]
-               [--abstract]
+  search QUERY [--domain auto|ml|phys|math|bio|psy|chem]
+               [--limit N] [--year 2020|2020-2024|2020-|:2019]
+               [--sort relevance|citations|date] [--abstract]
   read PDF_URL_OR_PATH [--pages 1-3] [--out FILE]
+  oa DOI
   selftest
 
-Stdlib only. PDF text extraction: pdftotext (poppler), pymupdf as lazy fallback.
+Stdlib only. PDF text: pdftotext (poppler), pymupdf if pdftotext is missing.
+Optional env: SEMANTIC_SCHOLAR_API_KEY, PAPER_SEARCH_EMAIL.
 """
 import argparse
 import json
+import os
 import re
 import ssl
 import subprocess
 import sys
+import tempfile
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
-import time
 from xml.etree import ElementTree
 
 UA = "paper-search-skill/1.0 (personal research tool)"
+EMAIL = os.environ.get("PAPER_SEARCH_EMAIL", "papers-search@example.org")
+S2_KEY = os.environ.get("SEMANTIC_SCHOLAR_API_KEY") or os.environ.get("S2_API_KEY")
 SSL_CTX = ssl.create_default_context()
 TIMEOUT = 30
+NS = {
+    "a": "http://www.w3.org/2005/Atom",
+    "arxiv": "http://arxiv.org/schemas/atom",
+}
 
 
-def http_json(url, retries=3):
-    """GET url -> parsed JSON, retrying 429/5xx with linear backoff (S2 rate-limits)."""
+def http_open(url, headers=None, retries=2, timeout=TIMEOUT):
+    """GET url. Retries 429 and 5xx. Other HTTP errors propagate."""
+    hdrs = {"User-Agent": UA}
+    if headers:
+        hdrs.update(headers)
     last = None
     for attempt in range(retries):
-        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        req = urllib.request.Request(url, headers=hdrs)
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT, context=SSL_CTX) as r:
-                return json.loads(r.read().decode())
+            return urllib.request.urlopen(req, timeout=timeout, context=SSL_CTX)
         except urllib.error.HTTPError as e:
             if e.code != 429 and e.code < 500:
                 raise
             last = e
-        except urllib.error.URLError as e:  # timeouts count as retryable
+            retry_after = e.headers.get("Retry-After") if e.headers else None
+        except urllib.error.URLError as e:
             last = e
+            retry_after = None
         if attempt + 1 < retries:
-            time.sleep(2 * (attempt + 1))  # 2s, 4s, 6s
+            delay = 1 + attempt
+            if retry_after and str(retry_after).isdigit():
+                delay = min(int(retry_after), 8)
+            time.sleep(delay)
     raise last
 
 
-def http_text(url):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=TIMEOUT, context=SSL_CTX) as r:
+def http_json(url, headers=None):
+    with http_open(url, headers=headers) as r:
+        return json.loads(r.read().decode())
+
+
+def http_text(url, headers=None):
+    with http_open(url, headers=headers) as r:
         return r.read().decode()
 
 
-def get_json(base_url, params):
-    return http_json(base_url + "?" + urllib.parse.urlencode(params))
+def get_json(base_url, params, headers=None):
+    return http_json(base_url + "?" + urllib.parse.urlencode(params), headers)
+
+
+def clean(text):
+    text = re.sub(r"<[^>]+>", "", text or "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def parse_year(year):
+    """Return (start, end). None means open. Accepts 2020, 2020-2024, 2020-, 2020:, :2019."""
+    if not year:
+        return None, None
+    text = year.strip().replace(":", "-")
+    if "-" not in text:
+        return text, text
+    lo, _, hi = text.partition("-")
+    return lo or None, hi or None
+
+
+def s2_year(lo, hi):
+    if lo and hi:
+        return lo if lo == hi else f"{lo}-{hi}"
+    if lo:
+        return f"{lo}-"
+    if hi:
+        return f"-{hi}"
+    return None
+
+
+def prefer_exact_title(query, results):
+    key = re.sub(r"[^a-z0-9]+", " ", query.lower()).strip()
+
+    def norm(title):
+        return re.sub(r"[^a-z0-9]+", " ", (title or "").lower()).strip()
+
+    exact = [r for r in results if norm(r["title"]) == key]
+    if not exact:
+        return results
+    rest = [r for r in results if norm(r["title"]) != key]
+    return exact + rest
 
 
 # ---------------------------------------------------------------- arXiv ----
-NS = {"a": "http://www.w3.org/2005/Atom"}
-
-
-def arxiv_date(date):  # "2020" / "2020-01" -> arXiv submittedDate filter half
-    y = int(date[:4])
-    m = int(date[5:7]) if len(date) >= 7 else 1
-    return f"{y:04d}{m:02d}010000"
-
-
 def search_arxiv(query, limit, year, sort):
-    sq = 'all:"{}"'.format(query) if " " in query else f"all:{query}"
-    if year:
-        parts = year.split(":")
-        lo = arxiv_date(parts[0])
-        hi = arxiv_date(parts[1]) if len(parts) > 1 and parts[1] else "999912312359"
-        sq += f" AND submittedDate:[{lo} TO {hi}]"
-    params = {"search_query": sq, "start": 0, "max_results": limit,
-              "sortBy": {"relevance": "relevance", "date": "submittedDate"}[sort]}
+    q = query.replace('"', "")
+    sq = f'all:"{q}"' if " " in q else f"all:{q}"
+    lo, hi = parse_year(year)
+    if lo or hi:
+        start = f"{int(lo):04d}01010000" if lo else "199101010000"
+        end = f"{int(hi):04d}12312359" if hi else "300012312359"
+        sq += f" AND submittedDate:[{start} TO {end}]"
+    sort_by = {"date": "submittedDate"}.get(sort, "relevance")
+    params = {
+        "search_query": sq,
+        "start": 0,
+        "max_results": limit,
+        "sortBy": sort_by,
+    }
     xml = http_text("https://export.arxiv.org/api/query?" + urllib.parse.urlencode(params))
     root = ElementTree.fromstring(xml)
     out = []
     for e in root.findall("a:entry", NS):
-        arxiv_id = e.find("a:id", NS).text.rsplit("/", 1)[-1]
-        doi_el = e.find("a:doi", NS)
+        title_el = e.find("a:title", NS)
+        published = e.find("a:published", NS)
+        summary = e.find("a:summary", NS)
+        id_el = e.find("a:id", NS)
+        if title_el is None or id_el is None or not (title_el.text and id_el.text):
+            continue
+        arxiv_id = re.sub(r"v\d+$", "", id_el.text.rsplit("/", 1)[-1])
+        doi_el = e.find("arxiv:doi", NS)
+        doi = clean(doi_el.text) if doi_el is not None and doi_el.text else ""
+        if not doi and re.fullmatch(r"\d{4}\.\d{4,5}", arxiv_id):
+            doi = f"10.48550/arXiv.{arxiv_id}"
         out.append({
-            "title": " ".join(e.find("a:title", NS).text.split()),
-            "year": e.find("a:published", NS).text[:4],
-            "doi": doi_el.text if doi_el is not None else "",
+            "title": clean(title_el.text),
+            "year": (published.text or "")[:4] if published is not None and published.text else "",
+            "doi": doi,
             "citations": "",
             "pdf": f"https://arxiv.org/pdf/{arxiv_id}",
-            "abstract": " ".join(e.find("a:summary", NS).text.split()),
+            "abstract": clean(summary.text if summary is not None else ""),
             "source": "arXiv",
         })
     return out
 
 
 # ------------------------------------------------------ Semantic Scholar ---
+def s2_headers():
+    return {"x-api-key": S2_KEY} if S2_KEY else None
+
+
 def search_s2(query, limit, year, sort):
     params = {
-        "query": query, "limit": min(limit, 100),
+        "query": query,
+        "limit": min(limit, 100),
         "fields": "title,abstract,year,externalIds,citationCount,openAccessPdf,venue",
-        "sort": {"citations": "citationCount:desc"}.get(sort, "relevance:desc"),
+        "sort": {"citations": "citationCount:desc", "date": "publicationDate:desc"}.get(
+            sort, "relevance:desc"),
     }
-    if year:
-        params["year"] = year  # "2020-2023" or "2020-" both valid for the API
-    data = get_json("https://api.semanticscholar.org/graph/v1/paper/search", params)
+    year_param = s2_year(*parse_year(year))
+    if year_param:
+        params["year"] = year_param
+    data = get_json(
+        "https://api.semanticscholar.org/graph/v1/paper/search", params, s2_headers())
     out = []
     for p in data.get("data") or []:
         out.append({
-            "title": p.get("title") or "",
+            "title": clean(p.get("title")),
             "year": p.get("year") or "",
-            "doi": (p.get("externalIds") or {}).get("DOI", ""),
+            "doi": (p.get("externalIds") or {}).get("DOI", "") or "",
             "citations": p.get("citationCount") or 0,
             "pdf": ((p.get("openAccessPdf") or {}).get("url") or ""),
-            "abstract": re.sub(r"\s+", " ", p.get("abstract") or ""),
+            "abstract": clean(p.get("abstract")),
             "source": "SemanticScholar",
         })
     return out
@@ -121,59 +196,67 @@ def openalex_abstract(inv):
     if not inv:
         return ""
     words = {}
-    for w, positions in inv.items():
+    for word, positions in inv.items():
         for pos in positions:
-            words[pos] = w
+            words[pos] = word
     return " ".join(words[i] for i in sorted(words))
 
 
 def search_openalex(query, limit, year, sort):
-    params = {"search": query, "per_page": min(limit, 100),
-              "mailto": "papers-search@example.org"}
+    params = {
+        "search": query,
+        "per_page": min(limit, 100),
+        "mailto": EMAIL,
+        "sort": {"citations": "cited_by_count:desc", "date": "publication_date:desc"}.get(
+            sort, "relevance_score:desc"),
+    }
+    lo, hi = parse_year(year)
     filters = []
-    if year:
-        lo, _, hi = year.partition(":")
-        if lo:
-            filters.append(f"from_publication_date:{lo}-01-01")
-        if hi:
-            filters.append(f"to_publication_date:{hi}-12-31")
-    params["sort"] = {"citations": "cited_by_count:desc", "date": "publication_date:desc"}.get(
-        sort, "relevance_score:desc")
+    if lo:
+        filters.append(f"from_publication_date:{lo}-01-01")
+    if hi:
+        filters.append(f"to_publication_date:{hi}-12-31")
     if filters:
-        params["filter"] = ",".join(filters) + ("," + params["sort"] if
-                                                sort in ("citations",) else "")
+        params["filter"] = ",".join(filters)
     data = get_json("https://api.openalex.org/works", params)
     out = []
     for w in data.get("results") or []:
         loc = w.get("primary_location") or {}
+        pdf = loc.get("pdf_url") or ""
+        if not pdf:
+            for candidate in w.get("locations") or []:
+                if candidate.get("pdf_url"):
+                    pdf = candidate["pdf_url"]
+                    break
         out.append({
-            "title": re.sub(r"\s+", " ", w.get("display_name") or ""),
+            "title": clean(w.get("display_name")),
             "year": w.get("publication_year") or "",
             "doi": (w.get("doi") or "").replace("https://doi.org/", ""),
             "citations": w.get("cited_by_count") or 0,
-            "pdf": loc.get("pdf_url") or "",
+            "pdf": pdf,
             "abstract": openalex_abstract(w.get("abstract_inverted_index")),
             "source": "OpenAlex",
         })
-    if sort == "citations":
-        out.sort(key=lambda r: -(r["citations"] or 0))
     return out
 
 
 # ----------------------------------------------------------- Europe PMC ---
 def search_europepmc(query, limit, year, sort):
     q = f"({query})"
-    if year:
-        lo, _, hi = year.partition(":")
-        if hi:
-            q += f' AND (PUB_YEAR:[{lo} TO {hi}])'
-        else:
-            q += f" AND (PUB_YEAR:{lo})"
-    params = {"query": q, "format": "json", "resultType": "core",
-              "pageSize": min(limit, 100)}
-    sort_map = {"citations": "CITED", "date": "DATE"}
-    if sort in sort_map:
-        params["sort"] = sort_map[sort]
+    lo, hi = parse_year(year)
+    if lo and hi and lo == hi:
+        q += f" AND (PUB_YEAR:{lo})"
+    elif lo or hi:
+        q += f" AND (PUB_YEAR:[{lo or '1900'} TO {hi or '2100'}])"
+    params = {
+        "query": q,
+        "format": "json",
+        "resultType": "core",
+        "pageSize": min(limit, 100),
+    }
+    sort_name = {"citations": "CITED", "date": "DATE"}.get(sort)
+    if sort_name:
+        params["sort"] = sort_name
     data = get_json("https://www.ebi.ac.uk/europepmc/webservices/rest/search", params)
     out = []
     for hit in data.get("resultList", {}).get("result", []):
@@ -183,14 +266,14 @@ def search_europepmc(query, limit, year, sort):
                 pdf_link = u.get("url", "")
                 break
         if pdf_link.startswith("http://europepmc.org"):
-            pdf_link = pdf_link.replace("http://", "https://")
+            pdf_link = "https://" + pdf_link[len("http://"):]
         out.append({
-            "title": re.sub(r"\s+", " ", hit.get("title", "")),
-            "year": hit.get("pubYear", ""),
-            "doi": hit.get("doi", ""),
+            "title": clean(hit.get("title")),
+            "year": hit.get("pubYear", "") or "",
+            "doi": hit.get("doi", "") or "",
             "citations": hit.get("citedByCount", 0) or 0,
             "pdf": pdf_link,
-            "abstract": re.sub(r"\s+", " ", hit.get("abstractText", "")),
+            "abstract": clean(hit.get("abstractText")),
             "source": "EuropePMC",
         })
     return out
@@ -203,29 +286,46 @@ DOMAIN_SOURCES = {
     "bio": (search_europepmc, search_s2),
     "psy": (search_europepmc, search_s2),
     "chem": (search_s2, search_openalex),
-    "general": (search_s2, search_openalex),
     "auto": (search_s2, search_openalex),
 }
 
 
+def source_chain(domain, sort):
+    chain = list(DOMAIN_SOURCES[domain])
+    if search_openalex not in chain:
+        chain.append(search_openalex)
+    if sort == "citations":
+        # arXiv has no citation counts. Keep it only as the last resort.
+        chain = [fn for fn in chain if fn is not search_arxiv] + [
+            fn for fn in chain if fn is search_arxiv]
+    ordered = []
+    for fn in chain:
+        if fn not in ordered:
+            ordered.append(fn)
+    return ordered
+
+
 def do_search(query, domain, limit, year, sort, show_abstract):
+    # Pull a few extra on relevance so an exact title match can move to the top
+    # even when --limit is smaller than where the API ranked it.
+    fetch = max(limit, 8) if sort == "relevance" else limit
     results, err = [], None
-    # universal safety net: OpenAlex indexes ~250M works and is the most reliable API
-    for fn in [*DOMAIN_SOURCES[domain], search_openalex]:
-        if results:  # first successful source wins; don't call lower-priority ones
+    for fn in source_chain(domain, sort):
+        if results:
             break
-        if fn is search_openalex and search_openalex in DOMAIN_SOURCES[domain]:
-            continue  # already in chain (general/chem) — don't call twice
         try:
-            results = fn(query, limit, year, sort)
-        except Exception as e:  # network / rate limit / parse: try next source
+            results = fn(query, fetch, year, sort)
+        except Exception as e:
             err = (err + "; " if err else "") + f"{fn.__name__}: {e}"
+            results = []
     if not results:
         print(f"ERROR: all sources failed — {err}", file=sys.stderr)
         return 1
     if err:
         print(f"NOTE: fallback used ({err})", file=sys.stderr)
-    print_results(results, show_abstract)
+    if sort == "relevance":
+        results = prefer_exact_title(query, results)
+    print_results(results[:limit], show_abstract)
     return 0
 
 
@@ -233,60 +333,83 @@ def print_results(results, show_abstract):
     for i, r in enumerate(results, 1):
         print(f"{i}. {r['title']}  [{r['source']}]")
         print(f"   year={r['year']}  doi={r['doi'] or '-'}  citations={r['citations'] or '-'}")
-        print(f"   pdf={r['pdf'] or '(paywall — try Unpaywall with the DOI)'}")
-        if show_abstract:
-            print(f"   abstract: {r['abstract'][:600]}{'…' if len(r['abstract']) > 600 else ''}")
+        print(f"   pdf={r['pdf'] or '(no open PDF — run: papers.py oa <DOI>)'}")
+        if show_abstract and r["abstract"]:
+            abstract = r["abstract"]
+            if len(abstract) > 2000:
+                abstract = abstract[:2000] + "…"
+            print(f"   abstract: {abstract}")
 
 
 # ---------------------------------------------------------------- read ----
+def rewrite_pdf_url(url):
+    match = re.match(r"https?://(?:www\.)?arxiv\.org/abs/([^?#]+)", url)
+    if match:
+        return "https://arxiv.org/pdf/" + match.group(1)
+    return url
+
+
 def download_pdf(url, path):
-    subprocess.run(["curl", "-sL", "-A", UA, "--max-time", "90", url, "-o", path],
-                   check=True)
+    req_headers = {"User-Agent": UA, "Accept": "application/pdf,*/*"}
+    with http_open(url, headers=req_headers, retries=2, timeout=90) as r, open(path, "wb") as f:
+        while True:
+            chunk = r.read(1 << 16)
+            if not chunk:
+                break
+            f.write(chunk)
 
 
-def do_read(target, pages, out_file):
-    path = target
-    if re.match(r"^https?://", target):
-        path = "/tmp/opencode/paper-search.pdf"
-        download_pdf(target, path)
-    lo, _, hi = (pages or "").partition("-")
-    start, end = (int(lo), int(hi or lo)) if pages else (None, None)
+def extract_pdf_text(path, pages):
+    lo = hi = None
+    if pages:
+        left, _, right = pages.partition("-")
+        lo, hi = left, (right or left)
     cmd = ["pdftotext"]
     if pages:
-        cmd += ["-f", lo, "-l", hi or lo]
+        cmd += ["-f", lo, "-l", hi]
     cmd += [path, "-"]
+    pdftotext_empty = False
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout
+        pdftotext_empty = r.returncode == 0
     except FileNotFoundError:
-        pass  # poppler not installed -> pymupdf fallback
+        pass
     try:
         import pymupdf
     except ImportError:
-        raise SystemExit("ERROR: neither pdftotext nor pymupdf available; "
-                         "run: pip install pymupdf")
+        if pdftotext_empty:
+            raise SystemExit("ERROR: PDF has no extractable text (likely scanned).")
+        raise SystemExit(
+            "ERROR: pdftotext not found and pymupdf is not installed. "
+            "Install poppler-utils.")
     doc = pymupdf.open(path)
-    rng = range(start - 1, end) if pages else range(doc.page_count)
-    return "".join(doc[i].get_text() for i in rng if i < doc.page_count)
+    if pages:
+        rng = range(int(lo) - 1, int(hi))
+    else:
+        rng = range(doc.page_count)
+    return "".join(doc[i].get_text() for i in rng if 0 <= i < doc.page_count)
 
 
 def do_read(target, pages, out_file):
     path = target
     if re.match(r"^https?://", target):
-        path = "/tmp/opencode/paper-search.pdf"
-        subprocess.run(["curl", "-sL", "-A", UA, "--max-time", "90",
-                        target, "-o", path], check=True)
+        target = rewrite_pdf_url(target)
+        path = os.path.join(tempfile.gettempdir(), "paper-search.pdf")
+        download_pdf(target, path)
     with open(path, "rb") as f:
-        if not f.read(5).startswith(b"%PDF"):
+        if not f.read(1024).lstrip().startswith(b"%PDF"):
             raise SystemExit(
-                f"ERROR: not a PDF ({target}). Probably a paywall landing page. "
-                "Use the DOI with Unpaywall: https://api.unpaywall.org/v2/<DOI>?email=you@example.org")
+                f"ERROR: not a PDF ({target}). Landing page or paywall. "
+                "Run: papers.py oa <DOI> and read the pdf= URL.")
     text = extract_pdf_text(path, pages)
     if not text.strip():
-        raise SystemExit("ERROR: PDF downloaded but no text extracted "
-                         "(scanned pages? try pymupdf or download elsewhere)")
+        raise SystemExit("ERROR: PDF downloaded but no text extracted (scanned pages).")
     if out_file:
+        parent = os.path.dirname(out_file)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(out_file, "w") as f:
             f.write(text)
         print(f"saved {len(text)} chars to {out_file}")
@@ -295,36 +418,96 @@ def do_read(target, pages, out_file):
     return 0
 
 
+# ------------------------------------------------------------------- oa ----
+def normalize_doi(doi):
+    doi = doi.strip()
+    doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", doi, flags=re.I)
+    return doi
+
+
+def do_oa(doi):
+    doi = normalize_doi(doi)
+    arxiv = re.fullmatch(r"10\.48550/arxiv\.(\d{4}\.\d{4,5})", doi, flags=re.I)
+    url = "https://api.unpaywall.org/v2/" + urllib.parse.quote(doi) + "?" + urllib.parse.urlencode(
+        {"email": EMAIL})
+    try:
+        data = http_json(url)
+    except urllib.error.HTTPError as e:
+        if e.code == 404 and arxiv:
+            pdf = f"https://arxiv.org/pdf/{arxiv.group(1)}"
+            print(f"doi={doi}")
+            print("is_oa=True")
+            print(f"pdf={pdf}")
+            print(f"url=https://arxiv.org/abs/{arxiv.group(1)}")
+            print("host=repository")
+            return 0
+        print(f"ERROR: unpaywall {e.code} for {doi}", file=sys.stderr)
+        return 1
+    except urllib.error.URLError as e:
+        print(f"ERROR: unpaywall unreachable ({e.reason})", file=sys.stderr)
+        return 1
+    locations = data.get("oa_locations") or []
+    best = data.get("best_oa_location") or {}
+    pdf = best.get("url_for_pdf") or ""
+    if not pdf:
+        for loc in locations:
+            if loc.get("url_for_pdf"):
+                pdf = loc["url_for_pdf"]
+                best = loc
+                break
+    print(f"doi={doi}")
+    print(f"is_oa={bool(data.get('is_oa'))}")
+    print(f"pdf={pdf or '-'}")
+    print(f"url={best.get('url') or '-'}")
+    print(f"host={best.get('host_type') or '-'}")
+    return 0
+
+
 # -------------------------------------------------------------- selftest --
 def selftest():
+    assert parse_year("2020-2024") == ("2020", "2024")
+    assert parse_year("2020:") == ("2020", None)
+    assert parse_year("2020-") == ("2020", None)
+    assert parse_year("2020") == ("2020", "2020")
+    assert parse_year(":2019") == (None, "2019")
+    assert s2_year("2020", "2024") == "2020-2024"
+    assert s2_year("2020", None) == "2020-"
+    ranked = prefer_exact_title("attention is all you need", [
+        {"title": "Tool Attention Is All You Need"},
+        {"title": "Attention Is All You Need"},
+    ])
+    assert ranked[0]["title"] == "Attention Is All You Need"
+    chain = source_chain("auto", "relevance")
+    assert chain[0] is search_s2 and chain[1] is search_openalex and len(chain) == 2
+    cited = source_chain("ml", "citations")
+    assert cited == [search_s2, search_openalex, search_arxiv]
+    print("OK: offline")
+
     print("== search arXiv (ml) ==")
-    results, err = [], None
-    try:
-        results = search_arxiv("attention is all you need", 5, None, "relevance")
-    except Exception as e:
-        err = e
-    assert results, f"arxiv search failed: {err}"
-    assert any("Attention" in r["title"] for r in results), "expected the transformer paper"
-    print(f"OK: {len(results)} results, top: {results[0]['title']}")
+    results = search_arxiv("attention is all you need", 5, None, "relevance")
+    assert results, "arxiv search returned nothing"
+    assert any(r["title"] == "Attention Is All You Need" for r in results), results[0]["title"]
+    print(f"OK: {len(results)} results, includes the transformer paper")
 
-    print("== search general (SemanticScholar w/ OpenAlex fallback) ==")
+    print("== search general (Semantic Scholar, else OpenAlex) ==")
     import io
-    from contextlib import redirect_stdout
+    from contextlib import redirect_stderr, redirect_stdout
     buf = io.StringIO()
-    with redirect_stdout(buf):
-        rc = do_search("CRISPR base editing", "general", 5, None, "relevance", False)
-    assert rc == 0, "general search failed on all sources"
+    with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+        rc = do_search("CRISPR base editing", "auto", 3, "2020-2024", "relevance", False)
+    assert rc == 0, "auto search failed on every source"
     lines = buf.getvalue()
-    assert "CRISPR" in lines, f"unexpected results:\n{lines}"
-    src = [l for l in lines.splitlines() if "CRISPR" in l][0]
-    print(f"OK via {('OpenAlex' if 'OpenAlex' in src else 'SemanticScholar')}: {src.strip()[:90]}")
+    assert "CRISPR" in lines.upper() or "crispr" in lines.lower(), lines
+    years = [int(y) for y in re.findall(r"year=(\d{4})", lines)]
+    assert years and all(2020 <= y <= 2024 for y in years), lines
+    print(f"OK: year filter held ({years})")
 
-    print("== read first arXiv PDF page 1 ==")
-    arxiv_pdf = next(r["pdf"] for r in results if r["pdf"])
-    path = "/tmp/opencode/paper-search-selftest.pdf"
-    subprocess.run(["curl", "-sL", "-A", UA, "--max-time", "90", arxiv_pdf, "-o", path], check=True)
+    print("== read arXiv page 1 ==")
+    text = None
+    path = os.path.join(tempfile.gettempdir(), "paper-search-selftest.pdf")
+    download_pdf("https://arxiv.org/pdf/1706.03762", path)
     text = extract_pdf_text(path, "1")
-    assert text.strip(), "no text extracted from arxiv pdf"
+    assert "Attention" in text, "page 1 did not contain the title"
     print(f"OK: extracted {len(text)} chars from page 1")
     print("SELFTEST PASSED")
     return 0
@@ -337,21 +520,24 @@ def main():
     s = sub.add_parser("search")
     s.add_argument("query")
     s.add_argument("--domain", default="auto", choices=list(DOMAIN_SOURCES))
-    s.add_argument("--limit", type=int, default=10)
-    s.add_argument("--year", default=None, help="2020-2023 or 2020:")
-    s.add_argument("--sort", default="relevance",
-                   choices=["relevance", "citations", "date"])
+    s.add_argument("--limit", type=int, default=8)
+    s.add_argument("--year", default=None, help="2020, 2020-2024, 2020-, or :2019")
+    s.add_argument("--sort", default="relevance", choices=["relevance", "citations", "date"])
     s.add_argument("--abstract", action="store_true")
     r = sub.add_parser("read")
     r.add_argument("target", help="pdf URL or local file path")
     r.add_argument("--pages", default=None, help="e.g. 1-3")
     r.add_argument("--out", default=None)
+    o = sub.add_parser("oa")
+    o.add_argument("doi", help="DOI or https://doi.org/...")
     sub.add_parser("selftest")
     a = ap.parse_args()
     if a.cmd == "search":
         sys.exit(do_search(a.query, a.domain, a.limit, a.year, a.sort, a.abstract))
     if a.cmd == "read":
         sys.exit(do_read(a.target, a.pages, a.out))
+    if a.cmd == "oa":
+        sys.exit(do_oa(a.doi))
     sys.exit(selftest())
 
 

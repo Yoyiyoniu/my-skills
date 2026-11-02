@@ -1,92 +1,98 @@
 ---
 name: paper-search
-description: Busca papers y documentos científicos en fuentes oficiales (arXiv, Semantic Scholar, Europe PMC, OpenAlex), descarga el PDF legal y lo lee convirtiéndolo a texto. Use when the user wants scientific papers, investigación académica, estado del arte, revisión de literatura, evidence on a topic, or asks "busca papers/papers sobre X", even if they only mention a topic without the word "paper". Also use for finding the readable PDF of a paper with a known DOI.
+description: >-
+  Searches official scholarly APIs (arXiv, Semantic Scholar, Europe PMC,
+  OpenAlex), reads the legal PDF, and writes a cited note from those papers.
+  Use when the user wants scientific papers, a literature review, state of
+  the art, evidence on a topic, a known DOI, or says "busca papers sobre X",
+  even if they never use the word paper.
 ---
 
-# paper-search — buscar y leer papers científicos
+# paper-search
 
-Buscas en APIs oficiales (JSON), haces triage de candidatos y lees el PDF.
-Nunca cite de memoria: todo claim debe venir del abstract o del PDF real.
+Search official APIs and read the legal PDF. A scientific claim is allowed only when the abstract or the PDF pages read in this session contain it. Do not supply it from memory, a blog, or any other secondary write-up. Follow every claim back to the paper that owns it.
 
-## Herramienta central
+Year, DOI, and citation count come from the script output. If `citations=-`, the source did not provide a count. Say that. Do not estimate it.
 
-Scripts (stdlib only, sin instalar nada):
+## Delegate the reading
 
+For a literature review, a state of the art, or any report that needs more than one paper, spin up a background agent to do the reading so this conversation can keep going. A single paper or a known DOI stays here.
+
+The background agent's job:
+
+1. Investigate the question against the papers themselves, not a secondary write-up of them.
+2. Write the findings to a single Markdown file, citing each claim's source.
+3. Save it where the repo already keeps such notes. Match the existing convention. If there is none, write `docs/notes/<topic>.md` and say where.
+
+Give it the absolute path to `scripts/papers.py`, the question, the domain, and the output path. It uses the script below and does not reimplement the APIs.
+
+## Script
+
+`scripts/papers.py` sits next to this file. Stdlib only. Run it by absolute path.
+
+```bash
+python3 scripts/papers.py search "QUERY" [--domain auto|ml|phys|math|bio|psy|chem] [--limit N] [--year 2020|2020-2024|2020-] [--sort relevance|citations|date] [--abstract]
+python3 scripts/papers.py read PDF_URL --pages 1-3 [--out notes.txt]
+python3 scripts/papers.py oa 10.xxxx/yyyy
 ```
-python3 ~/.agents/skills/paper-search/scripts/papers.py search "QUERY" [--domain D] [--limit N] [--year YYYY-YYYY|YYYY:] [--sort relevance|citations|date] [--abstract]
-python3 ~/.agents/skills/paper-search/scripts/papers.py read PDF_URL --pages 1-3 [--out notes.txt]
-```
 
-## 1. Clasificar el dominio del tema y elegir fuente
+`oa` prints `is_oa=` and `pdf=` from Unpaywall. One query, `--limit` at most 10. If the hit list is wrong, change the query. Do not page.
 
-`--domain auto` (default) busca en Semantic Scholar (índice universal) con
-fallback OpenAlex. Para temas de dominio claro, usa la fuente especialista:
+Optional: `SEMANTIC_SCHOLAR_API_KEY` (fewer 429s) and `PAPER_SEARCH_EMAIL` (OpenAlex and Unpaywall).
 
-| Dominio del tema | `--domain` | 1ª fuente (API) | Fallback |
+## Routing
+
+Translate the query to English before searching.
+
+| Topic | `--domain` | First source | If it fails |
 |---|---|---|---|
-| IA / ML / NLP / visión / robótica / CS | `ml` | arXiv | Semantic Scholar |
-| Física / astronomía | `phys` | arXiv | Semantic Scholar |
-| Matemáticas | `math` | arXiv | Semantic Scholar |
-| Bio / genética / medicina / farmaco / COVID | `bio` | Europe PMC | Semantic Scholar |
-| Psicología / ciencias cognitivas | `psy` | Europe PMC | Semantic Scholar |
-| Química / materiales | `chem` | Semantic Scholar | OpenAlex |
-| General / interdisciplinar | `auto` | Semantic Scholar | OpenAlex |
+| AI / ML / NLP / vision / robotics / CS | `ml` | arXiv | Semantic Scholar, then OpenAlex |
+| Physics / astronomy | `phys` | arXiv | Semantic Scholar, then OpenAlex |
+| Mathematics | `math` | arXiv | Semantic Scholar, then OpenAlex |
+| Bio / medicine / genetics / pharma | `bio` | Europe PMC | Semantic Scholar, then OpenAlex |
+| Psychology / cognitive science | `psy` | Europe PMC | Semantic Scholar, then OpenAlex |
+| Chemistry / materials | `chem` | Semantic Scholar | OpenAlex |
+| Mixed or unclear | `auto` | Semantic Scholar | OpenAlex |
 
-Notas de routing:
-- Semantic Scholar es la mejor ley universal: devuelve abstract, `citationCount`
-  y `openAccessPdf.url` en un solo hit. Empieza por ahí si dudas.
-- "estado del arte / top papers del área" → `--sort citations`.
-- "lo más reciente" → `--sort date` o `--year` reciente.
-- Query SIEMPRE en inglés (las APIs están en inglés); traduce mentalmente el
-  tema del usuario antes de buscar.
+- State of the art, or "most cited": `--sort citations`. arXiv has no citation counts, so that sort starts at Semantic Scholar.
+- What is new: `--sort date` or `--year 2023-`.
+- A paper named by its title: search that English title. With `--sort relevance`, an identical title is ranked first.
 
-## 2. Triage (tú lo haces, no la script)
+## Triage
 
-Presenta al usuario la lista con 3 categorías, bien con `--abstract` o tras
-leer abstracts:
-- **landmark**: muchas citas y viejo → fondo del campo.
-- **reciente**: ≤ 2 años y relevante, citas aún pocas → frontera actual.
-- **marginal**: tangencial → descartar, no presentarlo.
+Run the search with `--abstract`. Keep only the papers you will use.
 
-Muestra siempre: título, año, DOI, citas, URL del PDF. Nunca inventes citas.
+- **landmark**: heavily cited and older than two years.
+- **recent**: from the last two years and on the question, even with few citations.
+- **marginal**: off to the side. Leave it out of the note.
 
-## 3. Leer (abstract primero, PDF solo si hace falta)
+## Read
 
-1. El **abstract** de la búsqueda basta la mayoría de las veces — no descargues
-   el PDF si el abstract responde la pregunta.
-2. PDF necesario (método, resultados, figuras):
-   ```
-   papers.py read <pdf_url> --pages 1-3          # abstract+intro: suficiente casi siempre
-   papers.py read <pdf_url> --pages 25-30        # conclusiones / discusión
-   papers.py read <pdf_url> --out /tmp/opencode/paper.txt  # guardar para re-leer
-   ```
-3. Si la lectura falla con "not a PDF / paywall" → busca copia legal con el DOI:
-   ```
-   webfetch https://api.unpaywall.org/v2/<DOI>?email=unpaywall@ourresearch.org
-   ```
-   usa `best_oa_location.url_for_pdf`. Fuentes acreditadas de copias
-   legales: repositorios del autor, Europe PMC, arXiv, CORE, DOAJ.
-   Nunca githubs de shadow libraries ni sci-hub.
+1. The abstract is enough unless the user asked for a method, a number, or a quotation.
+2. Open the PDF only then: `read URL --pages 1-3`. For the ending, read the last 2–4 pages. If you do not know the length, stay on 1–3. Do not guess page numbers.
+3. `ERROR: not a PDF` or `pdf=(no open PDF…)`: run `oa <DOI>` and read the `pdf=` it prints. If `pdf=-`, there is no legal direct PDF. Keep the abstract. Do not treat the landing `url=` as the paper.
+4. These hosts can be read directly: `arxiv.org`, `europepmc.org`, `ncbi.nlm.nih.gov`, and a university repository. Any other host goes through `oa` first.
+5. Do not use Sci-Hub, Library Genesis, or other shadow-library mirrors.
 
-## 4. Síntesis citada (claim a claim)
+Read at most three PDFs per run. If the question needs more, finish from abstracts and list the ones you did not open.
 
-- Cada claim cita su fuente: "(Vaswani et al. 2017, arXiv:1706.03762)".
-- Si el usuario pidió "estado del arte" o "reporte": escribir los hallazgos en
-  un Markdown en la carpeta de notas del repo (misma convención que la skill
-  `research`); si no hay, `docs/notas/` y avisar dónde quedó.
-- Paraayar lectura larga: delegate la lectura de muchos PDFs a un subagent
-  `background` — perguntale que extraiga abstract + conclusions + 2-3
-  claims citados por paper.
+## Note
 
-## 5. Reglas
+```markdown
+# <question>
 
-- Máx 10 resultados por query; refina el query en vez de paginar.
-- Rate limits: Semantic Scholar 1 req/seg — espera entre llamadas las que
-  hagas seguidas; OpenAlex/Crossref piden `mailto` en la query (la script
-  ya lo manda).
-- Si ni Semantic Scholar ni la fuente del dominio dan el PDF, prueba
-  manualmente Crossref (`api.crossref.org/works?query=`) o DOAJ
-  (`doaj.org/api/search/articles/`) — una sola llamada webfetch basta.
-- Solo fuentes oficiales; pdf_url que no sea del dominio oficial (arxiv.org,
-  europepmc.org, doi.io OA, repositorio `.universidad.edu`) → validar con
-  Unpaywall antes de leer.
+## Findings
+- Claim, only if the abstract or the named pages say it. (Vaswani et al. 2017, 10.48550/arXiv.1706.03762, abstract)
+
+## Papers
+- **Attention Is All You Need** (2017) — 120404 citations, OpenAlex
+  - doi: 10.48550/arXiv.1706.03762
+  - pdf: https://arxiv.org/pdf/1706.03762
+  - read: abstract only
+  - why it is here: one line taken from that text
+
+## Not read
+- Papers left out as off-topic, or PDFs that were not opened.
+```
+
+In chat, point at the file. Do not paste it back. Same citation rule for a one-paper answer that never becomes a file: author, year, DOI, and whether it came from the abstract or from which pages.
