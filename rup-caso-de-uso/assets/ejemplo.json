@@ -1,0 +1,67 @@
+{
+  "proyecto": {
+    "nombre": "[PENDIENTE: nombre oficial del proyecto]",
+    "empresa": "Inmobiliaria Moach & Mohamad Management",
+    "organizacion": "BugLabs",
+    "identificador": "UCS"
+  },
+  "documento": { "version": "1.0", "fecha": "05/Noviembre/2026" },
+  "historial": [
+    {
+      "fecha": "05/Noviembre/2026",
+      "version": "1.0",
+      "descripcion": "Ejemplo de forma, reescrito con las reglas de redacción.",
+      "autor": "[PENDIENTE: autor]"
+    }
+  ],
+  "redaccion": { "humanizer_aplicado": false },
+  "contenido": {
+    "nombre": "Solicitar cita",
+    "actores": ["Cliente potencial"],
+    "actor_principal": "Cliente potencial",
+    "descripcion": "El Cliente potencial pide una cita para visitar un inmueble publicado. El Sistema registra la solicitud y confirma el registro por correo electrónico.",
+    "inicio": "el Cliente potencial solicita una cita para un inmueble publicado",
+    "flujo_basico": [
+      {
+        "paso": "El Sistema solicita los datos de la cita:",
+        "subpasos": ["Nombre completo", "Correo electrónico", "Teléfono", "Día disponible", "Hora disponible"]
+      },
+      { "paso": "El Cliente potencial proporciona los datos de la cita." },
+      { "paso": "El Cliente potencial envía la solicitud." },
+      { "paso": "El Sistema valida los datos obligatorios." },
+      { "paso": "El Sistema registra la solicitud de cita para el inmueble seleccionado." },
+      { "paso": "El Sistema informa al Cliente potencial que la solicitud quedó registrada." },
+      { "paso": "El Sistema envía un correo electrónico de confirmación al Cliente potencial." }
+    ],
+    "flujos_alternos": [
+      {
+        "nombre": "Datos incompletos",
+        "desde_paso": 4,
+        "condicion": "falta un dato obligatorio o un dato tiene un formato inválido",
+        "pasos": [{ "paso": "El Sistema indica al Cliente potencial los datos que debe corregir." }],
+        "regresa_a_paso": 2
+      },
+      {
+        "nombre": "Solicitud cancelada",
+        "desde_paso": 3,
+        "condicion": "el Cliente potencial cancela la solicitud",
+        "pasos": [{ "paso": "El Sistema descarta los datos de la cita." }],
+        "finaliza": true
+      }
+    ],
+    "requerimientos_especiales": [],
+    "precondiciones": [
+      {
+        "nombre": "Inmueble disponible para cita",
+        "descripcion": "Existe un inmueble publicado y habilitado para solicitar cita."
+      }
+    ],
+    "postcondiciones": [
+      {
+        "nombre": "Solicitud registrada",
+        "descripcion": "La solicitud de cita queda registrada con su fecha y hora."
+      }
+    ],
+    "puntos_extension": []
+  }
+}
