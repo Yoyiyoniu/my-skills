@@ -1,0 +1,132 @@
+{
+  "proyecto": {
+    "nombre": "[PENDIENTE: nombre oficial del proyecto]",
+    "empresa": "Inmobiliaria Moach & Mohamad Management",
+    "organizacion": "BugLabs",
+    "identificador": "SUPL"
+  },
+  "documento": {
+    "version": "1.0",
+    "fecha": "05/Noviembre/2026"
+  },
+  "historial": [
+    {
+      "fecha": "05/Noviembre/2026",
+      "version": "1.0",
+      "descripcion": "Ejemplo de forma, escrito con las reglas de redacción.",
+      "autor": "[PENDIENTE: autor]"
+    }
+  ],
+  "redaccion": {
+    "humanizer_aplicado": false
+  },
+  "contenido": {
+    "introduccion": {
+      "objetivo": "Este documento reúne los requisitos del sistema que no pertenecen a un solo caso de uso.",
+      "alcance": "Aplica a todos los casos de uso del proyecto, entre ellos Realizar pago de renta, Consultar recibos y Solicitar cita.",
+      "definiciones": {
+        "remite_glosario": true
+      },
+      "referencias": [
+        "Glosario del proyecto.",
+        "Especificaciones de casos de uso del proyecto."
+      ],
+      "descripcion_general": "Las secciones 2 a 7 listan requisitos por categoría. Las secciones 8 a 13 cubren documentación, componentes, interfaces, licencias, avisos y normas."
+    },
+    "funcionalidad": {
+      "requisitos": [
+        {
+          "titulo": "Confirmación por correo",
+          "descripcion": "Cuando se registre una solicitud de cita, el Sistema deberá enviar un correo electrónico de confirmación.",
+          "casos_uso": [
+            "Solicitar cita"
+          ]
+        }
+      ]
+    },
+    "usabilidad": {
+      "requisitos": [
+        {
+          "titulo": "Tiempo de aprendizaje",
+          "descripcion": "El Sistema deberá permitir que un Administrador nuevo registre una propiedad tras [PENDIENTE: tiempo de capacitación] de capacitación."
+        }
+      ]
+    },
+    "confiabilidad": {
+      "requisitos": [
+        {
+          "titulo": "Disponibilidad",
+          "descripcion": "El Sistema deberá estar disponible [PENDIENTE: porcentaje de disponibilidad] del tiempo."
+        }
+      ]
+    },
+    "desempeno": {
+      "requisitos": [
+        {
+          "titulo": "Tiempo de respuesta del pago",
+          "descripcion": "Cuando el Arrendatario confirme un pago, el Sistema deberá responder en [PENDIENTE: tiempo máximo].",
+          "casos_uso": [
+            "Realizar pago de renta"
+          ]
+        }
+      ]
+    },
+    "soporte": {
+      "requisitos": [
+        {
+          "titulo": "Registro de errores",
+          "descripcion": "Si falla el envío de un correo electrónico, entonces el Sistema deberá registrar el error."
+        }
+      ]
+    },
+    "restricciones_diseno": {
+      "requisitos": [
+        {
+          "titulo": "Plataforma",
+          "descripcion": "El Sistema deberá ejecutarse en [PENDIENTE: plataforma]."
+        }
+      ]
+    },
+    "documentacion": {
+      "texto": [
+        "[PENDIENTE: requisitos de ayuda en línea]"
+      ]
+    },
+    "componentes_adquiridos": {
+      "no_aplica": true
+    },
+    "interfaces": {
+      "usuario": {
+        "texto": [
+          "[PENDIENTE: descripción de las interfaces de usuario]"
+        ]
+      },
+      "hardware": {
+        "no_aplica": true
+      },
+      "software": {
+        "texto": [
+          "[PENDIENTE: servicios externos, como la pasarela de pago]"
+        ]
+      },
+      "comunicacion": {
+        "texto": [
+          "[PENDIENTE: protocolos de comunicación]"
+        ]
+      }
+    },
+    "licencia": {
+      "no_aplica": true
+    },
+    "avisos_legales": {
+      "texto": [
+        "[PENDIENTE: avisos legales]"
+      ]
+    },
+    "normas": {
+      "texto": [
+        "[PENDIENTE: normas aplicables]"
+      ]
+    }
+  }
+}
