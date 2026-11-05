@@ -1,0 +1,64 @@
+{
+  "proyecto": {
+    "nombre": "[PENDIENTE: nombre oficial del proyecto]",
+    "empresa": "Inmobiliaria Moach & Mohamad Management",
+    "organizacion": "BugLabs",
+    "identificador": "GLOS"
+  },
+  "documento": {
+    "version": "1.0",
+    "fecha": "05/Noviembre/2026"
+  },
+  "historial": [
+    {
+      "fecha": "05/Noviembre/2026",
+      "version": "1.0",
+      "descripcion": "Ejemplo de forma, escrito con las reglas de redacción.",
+      "autor": "[PENDIENTE: autor]"
+    }
+  ],
+  "redaccion": {
+    "humanizer_aplicado": false
+  },
+  "contenido": {
+    "introduccion": {
+      "proposito": "Este glosario define los términos del dominio que usan los casos de uso y la Especificación Suplementaria.",
+      "alcance": "Aplica a todos los documentos del proyecto.",
+      "referencias": [
+        "Especificaciones de casos de uso del proyecto."
+      ],
+      "descripcion_general": "La sección 2 presenta los términos en orden alfabético, seguidos de los grupos. La sección 3 lista los estereotipos UML."
+    },
+    "terminos": [
+      {
+        "termino": "Inmueble",
+        "definicion": "Bien raíz que el Administrador registra en el catálogo y que puede rentarse."
+      },
+      {
+        "termino": "Cliente potencial",
+        "definicion": "Persona que consulta el catálogo y solicita una cita, sin contrato vigente."
+      },
+      {
+        "termino": "Arrendatario",
+        "definicion": "[PENDIENTE: definición de Arrendatario]"
+      }
+    ],
+    "grupos": [
+      {
+        "nombre": "Cobranza",
+        "descripcion": "Términos sobre el cobro de la renta.",
+        "terminos": [
+          {
+            "termino": "Recibo",
+            "definicion": "Comprobante que el Sistema registra por un pago y que el Arrendatario consulta."
+          },
+          {
+            "termino": "Cobro vencido",
+            "definicion": "Estado de una renta cuya fecha límite pasó sin un pago registrado."
+          }
+        ]
+      }
+    ],
+    "estereotipos": []
+  }
+}
