@@ -24,7 +24,7 @@ ESQUEMA_BASE = {
     "proyecto": {"nombre": str, "empresa": str, "organizacion": str, "identificador": str},
     "documento": {"version": str, "fecha": str},
     "historial": [{"fecha": str, "version": str, "descripcion": str, "autor": str}],
-    "redaccion": Opcional({"humanizer_aplicado": bool}),
+    "redaccion": Opcional({"humanizer_aplicado": bool, "revision_confirmada": Opcional(bool)}),
 }
 
 _NOMBRES = {str: "texto", int: "número entero", bool: "booleano"}
@@ -106,6 +106,10 @@ def recorrer_textos(valor, ruta=""):
 
 def pendientes(datos):
     return [(r, m) for r, t in recorrer_textos(datos) for m in PENDIENTE.findall(t)]
+
+
+def revision_confirmada(datos):
+    return datos.get("redaccion", {}).get("revision_confirmada") is True
 
 
 def humanizer_declarado(datos):

@@ -280,6 +280,7 @@ TIPO = cli.TipoDocumento(
         "Para personalizar los campos", "La descripción del requisito", "Cuando se emplean herramientas",
         "Requisitos legales y reglamentarios", "Especificar el tiempo de capacitación",
     ],
+    seccion_registro=lambda d: TITULO,
     etiquetas_en=[r"(?i)Especificación complementaria", r", 2001\b", r"Página\d"],
 )
 

@@ -11,6 +11,7 @@ Produce el documento de 13 secciones que recoge lo que no pertenece a un solo ca
 
 Lee estos archivos, en este orden:
 
+0. `preguntas-respuestas.md`, junto al JSON, si ya existe: lo que el usuario ya respondió. Es obligatorio.
 1. `references/negative-prompt.md`: qué no escribir. Es obligatorio.
 2. `references/reglas-redaccion.md`: cómo se escribe cada sentencia.
 3. `references/guia-secciones.md`: qué va en cada sección y el contrato del JSON.
@@ -22,6 +23,8 @@ Lee estos archivos, en este orden:
 - **Los documentos de `docs/` no son modelo.** Su redacción es incorrecta: úsalos solo para obtener hechos.
 - **Nada se inventa.** Actores, reglas, cifras, normas, autores y fechas vienen del usuario o de sus documentos. Lo demás es `[PENDIENTE: qué falta]`.
 - **Si dos documentos se contradicen, pregunta.** No elijas por tu cuenta. El nombre del sistema aparece como "Gestión de Propiedades" y "Gestión de Inmuebles": confírmalo con el usuario.
+- **Cada pregunta y respuesta se guarda.** Usa `preguntas-respuestas.md`, con la sección `## Especificación Suplementaria`, como indica `../_rup-comun/registro-preguntas.md`. Sus respuestas prevalecen sobre cualquier documento y no se vuelven a preguntar.
+- **Cada edición se confirma.** Antes de generar, sugiere al usuario la fecha, la versión, la descripción y el autor de esta edición, y pide su confirmación. Una sugerencia sin confirmar no vale.
 - **`humanizer` es obligatorio** antes de una versión final.
 
 ## Leer los documentos existentes
@@ -34,6 +37,8 @@ uv run .claude/skills/_rup-comun/leer_docx.py "docs/<documento>.docx"
 
 ## Flujo
 
+Cada vez que el usuario responda, guarda la pregunta y su respuesta textual en el registro antes de seguir.
+
 1. **Reúne los requisitos.** Lee los UCS de `docs/` para no duplicar lo que ya cubren. En Funcionalidad van solo requisitos transversales; cita los casos de uso por su nombre y no copies sus flujos. Pregunta cada umbral: no propongas cifras por tu cuenta.
 2. **Redacta el JSON** en un archivo fuera de `docs/`, con `assets/ejemplo.json` como modelo.
 3. **Revisa** desde la raíz del repositorio:
@@ -43,12 +48,13 @@ uv run .claude/skills/_rup-comun/leer_docx.py "docs/<documento>.docx"
    Corrige los bloqueos y revisa cada aviso.
 4. **Invoca la skill `humanizer`** como indica `redaccion-humanizada.md`. Después pon `redaccion.humanizer_aplicado: true`.
 5. **Vuelve a revisar** con `--solo-lint`: `humanizer` no debe haber cambiado nada protegido.
-6. **Genera:**
+6. **Confirma la edición.** Presenta una sugerencia para la fecha, la versión, la descripción y el autor, como indica `../_rup-comun/registro-preguntas.md`, y pide confirmarlas o cambiarlas. Guarda las respuestas en el registro, añade la revisión al `historial` y pon `redaccion.revision_confirmada: true`. `--solo-lint` muestra la edición que quedará en el documento.
+7. **Genera:**
    ```bash
    uv run .claude/skills/rup-especificacion-suplementaria/scripts/generar.py entrada.json
    ```
    El documento queda en `docs/Especificacion Suplementaria.docx`.
-7. **Informa** de los avisos que queden y de los datos que confirmaste. Recuerda que el índice se actualiza con F9 si el equipo abre el documento en Word.
+8. **Informa** de los avisos que queden y de los datos que confirmaste. Recuerda que el índice se actualiza con F9 si el equipo abre el documento en Word.
 
 Si aún hay pendientes, genera un borrador y dilo con claridad:
 
@@ -61,9 +67,10 @@ uv run .claude/skills/rup-especificacion-suplementaria/scripts/generar.py entrad
 | Opción | Efecto |
 |---|---|
 | `--salida RUTA` | Escribe en otra ruta |
-| `--borrador` | Admite pendientes y bloqueos del lint; no es una versión final |
+| `--borrador` | Admite pendientes, bloqueos del lint y falta de registro; no es una versión final |
 | `--sobrescribir` | Reemplaza un archivo existente, que por defecto se protege |
 | `--pdf` | Deja también una copia en PDF |
+| `--registro RUTA` | Usa otro registro de preguntas y respuestas |
 | `--solo-lint` | Revisa sin crear ningún documento |
 
 Requiere `uv`, LibreOffice (`soffice`) y `pdftotext`. Las páginas del índice se calculan con LibreOffice: en Word pueden diferir, y se actualizan con F9.

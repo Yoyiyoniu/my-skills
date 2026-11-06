@@ -367,8 +367,11 @@ class Glosario:
 
     def _idioma(self):
         idioma, pais = f"{{{NS['fo']}}}language", f"{{{NS['fo']}}}country"
+        alineacion = f"{{{NS['fo']}}}text-align"
         for raiz in (self.styles, self.content):
             for el in raiz.iter():
+                if el.get(alineacion) == "end":
+                    el.set(alineacion, "right")
                 if el.get(idioma):
                     el.set(idioma, "es")
                     el.set(pais, "MX")
@@ -427,6 +430,7 @@ TIPO = cli.TipoDocumento(
     salida_por_defecto=lambda d: Path("docs") / "Glosario.odt",
     textos=verificar.textos_odt,
     guias=verificar.guias_de(verificar.textos_odt(PLANTILLA)) + ["The definition for"],
+    seccion_registro=lambda d: TITULO,
     etiquetas_en=[
         r"\bGlossary\b", r"\bRevision History\b", r"\bTable of Contents\b", r"\bIntroduction\b", r"\bPurpose\b",
         r"\bScope\b", r"\bReferences\b", r"\bOverview\b", r"\bDefinitions\b", r"\bUML Stereotypes\b",

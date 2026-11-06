@@ -2,7 +2,7 @@
 import pytest
 from conftest import escribir, limpiar_pendientes
 
-from rup_comun import cli, entrada, lint, render, salida, verificar
+from rup_comun import cli, entrada, lint, registro, render, salida, verificar
 from rup_comun.lint import AVISA, BLOQUEA, Campo
 
 
@@ -216,3 +216,66 @@ def test_lector_docx_sin_libreoffice(uc, datos_uc, tmp_path, monkeypatch):
     texto = modulo.lineas(destino)
     assert "4. El Sistema valida los datos obligatorios." in [t.strip() for t in texto]
     assert "a. Nombre completo" in [t.strip() for t in texto]
+
+
+def test_registro_ausente_bloquea_final(uc, datos_uc, tmp_path, capsys):
+    entrada_json = escribir(tmp_path, limpiar_pendientes(datos_uc))
+    (tmp_path / "preguntas-respuestas.md").unlink()
+    destino = tmp_path / "o.docx"
+    assert cli.ejecutar(uc.TIPO, [entrada_json, "--salida", str(destino)]) == 1
+    assert "registro de preguntas" in capsys.readouterr().out and not destino.exists()
+
+
+def test_registro_ausente_permite_borrador(uc, datos_uc, tmp_path):
+    entrada_json = escribir(tmp_path, limpiar_pendientes(datos_uc))
+    (tmp_path / "preguntas-respuestas.md").unlink()
+    assert cli.ejecutar(uc.TIPO, [entrada_json, "--borrador", "--salida", str(tmp_path / "o.docx")]) == 0
+
+
+def test_registro_sin_seccion_del_documento(tmp_path):
+    ruta = tmp_path / "r.md"
+    ruta.write_text("## UCS Otro\n\nSin preguntas.\n", encoding="utf-8")
+    assert "UCS Solicitar cita" in registro.problemas(ruta, "UCS Solicitar cita")[0]
+
+
+def test_registro_seccion_vacia(tmp_path):
+    ruta = tmp_path / "r.md"
+    ruta.write_text("## UCS Solicitar cita\n\n## UCS Otro\n\n| 1 | a | b |\n", encoding="utf-8")
+    assert registro.problemas(ruta, "UCS Solicitar cita")
+
+
+def test_registro_con_respuestas(tmp_path):
+    ruta = tmp_path / "r.md"
+    ruta.write_text("## UCS Solicitar cita\n\n| N.º | Pregunta | Respuesta |\n|---|---|---|\n| 1 | a | b |\n", encoding="utf-8")
+    assert registro.problemas(ruta, "UCS Solicitar cita") == []
+
+
+def test_opcion_registro_en_otra_ruta(uc, datos_uc, tmp_path):
+    entrada_json = escribir(tmp_path, limpiar_pendientes(datos_uc))
+    otra = tmp_path / "otra.md"
+    (tmp_path / "preguntas-respuestas.md").rename(otra)
+    assert cli.ejecutar(uc.TIPO, [entrada_json, "--registro", str(otra), "--salida", str(tmp_path / "o.docx")]) == 0
+
+
+def test_edicion_sin_confirmar_bloquea_final(uc, datos_uc, tmp_path, capsys):
+    d = limpiar_pendientes(datos_uc)
+    d["redaccion"]["revision_confirmada"] = False
+    destino = tmp_path / "o.docx"
+    assert cli.ejecutar(uc.TIPO, [escribir(tmp_path, d), "--salida", str(destino)]) == 1
+    assert "esta edición" in capsys.readouterr().out and not destino.exists()
+
+
+def test_solo_lint_muestra_la_edicion(uc, datos_uc, tmp_path, capsys):
+    cli.ejecutar(uc.TIPO, [escribir(tmp_path, limpiar_pendientes(datos_uc)), "--solo-lint"])
+    assert "Edición: versión 1.0" in capsys.readouterr().out
+
+
+def test_portada_alineada_a_la_derecha(uc, datos_uc, tmp_path):
+    import zipfile
+    destino = tmp_path / "o.docx"
+    assert cli.ejecutar(uc.TIPO, [escribir(tmp_path, limpiar_pendientes(datos_uc)), "--salida", str(destino)]) == 0
+    with zipfile.ZipFile(destino) as z:
+        partes = [z.read(n).decode() for n in z.namelist() if n.startswith("word/") and n.endswith(".xml")]
+    texto = "".join(partes)
+    assert 'w:jc w:val="end"' not in texto and 'w:jc w:val="start"' not in texto
+    assert 'w:jc w:val="right"' in partes[[n for n in zipfile.ZipFile(destino).namelist() if n.startswith("word/") and n.endswith(".xml")].index("word/document.xml")]

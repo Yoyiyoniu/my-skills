@@ -18,7 +18,8 @@
     }
   ],
   "redaccion": {
-    "humanizer_aplicado": false
+    "humanizer_aplicado": false,
+    "revision_confirmada": false
   },
   "contenido": {
     "introduccion": {

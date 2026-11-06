@@ -285,6 +285,7 @@ def construir(datos):
              "No se identificaron puntos de extensión para este caso de uso.")
 
     indice.escribir(cuerpo.indice)
+    du.normalizar_alineacion(doc)
     du.poner_idioma(doc)
     du.propiedades(doc, titulo, datos)
     return du.DocumentoDocx(doc, indice, cuerpo.indice)
@@ -304,6 +305,7 @@ TIPO = cli.TipoDocumento(
     guias=verificar.guias_de(verificar.textos_docx(PLANTILLA)) + [
         "The use-case diagrams", "The use case describes", "Simple alternatives may", "A picture is sometimes",
     ],
+    seccion_registro=lambda d: f"UCS {d['contenido']['nombre']}",
     etiquetas_en=[
         r"\bRevision History\b", r"\bTable of Contents\b", r"\bUse-Case\b", r"\bUse Case\b", r"\bFlow of Events\b",
         r"\bBasic Flow\b", r"\bAlternative Flows?\b", r"\bSpecial Requirements?\b", r"\bPreconditions?\b",

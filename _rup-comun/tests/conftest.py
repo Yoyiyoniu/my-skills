@@ -28,7 +28,7 @@ def limpiar_pendientes(datos):
     import re
     texto = re.sub(r"\[PENDIENTE:[^\]]*\]", "Valor de prueba", texto)
     d = json.loads(texto)
-    d["redaccion"] = {"humanizer_aplicado": True}
+    d["redaccion"] = {"humanizer_aplicado": True, "revision_confirmada": True}
     return d
 
 
@@ -65,4 +65,7 @@ def datos_glos():
 def escribir(tmp_path, datos, nombre="entrada.json"):
     ruta = tmp_path / nombre
     ruta.write_text(json.dumps(datos, ensure_ascii=False), encoding="utf-8")
+    secciones = ["UCS Solicitar cita", "Especificación Suplementaria", "Glosario"]
+    (tmp_path / "preguntas-respuestas.md").write_text(
+        "".join(f"## {s}\n\nSin preguntas.\n\n" for s in secciones), encoding="utf-8")
     return str(ruta)

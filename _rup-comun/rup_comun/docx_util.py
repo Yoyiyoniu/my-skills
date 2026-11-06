@@ -128,6 +128,16 @@ def limpiar_parrafo(parrafo):
             parrafo.remove(r)
 
 
+def normalizar_alineacion(doc):
+    """Cambia jc end/start por right/left: Word ignora los primeros en modo de compatibilidad."""
+    equivalentes = {"end": "right", "start": "left"}
+    partes = [doc.element, doc.styles.element] + [p for p, _ in partes_encabezado_pie(doc)]
+    for parte in partes:
+        for jc in parte.iter(qn("w:jc")):
+            valor = jc.get(qn("w:val"))
+            jc.set(qn("w:val"), equivalentes.get(valor, valor))
+
+
 def poner_idioma(doc):
     """Las plantillas declaran inglés: Word marcaría todo el texto como error."""
     estilos = doc.styles.element

@@ -4,6 +4,7 @@ Código y reglas que comparten `rup-caso-de-uso`, `rup-especificacion-suplementa
 
 - `rup_comun/`: validación del JSON, lint, render, índice y escritura segura.
 - `leer_docx.py`: imprime el texto de un `.docx` con sus números de lista, sin LibreOffice.
+- `registro-preguntas.md`: cómo guardar las preguntas y respuestas de cada documento.
 - `reglas-comunes.md`: fuentes, reglas comunes, conflictos y lo que no se pudo verificar.
 - `redaccion-humanizada.md`: cómo usar `humanizer` en estos documentos.
 

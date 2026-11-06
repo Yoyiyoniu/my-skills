@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import entrada, lint, render, salida, verificar
+from . import entrada, lint, registro, render, salida, verificar
 
 
 @dataclass
@@ -23,6 +23,7 @@ class TipoDocumento:
     textos: Callable           # ruta -> [párrafos]
     guias: list
     etiquetas_en: list
+    seccion_registro: Callable  # datos -> título de su sección en el registro
 
 
 def validar_entrada(tipo, datos):
@@ -40,12 +41,16 @@ def revisar(tipo, datos):
     return lint.revisar(tipo.campos(datos), lint.REGLAS_COMUNES + tipo.reglas) + tipo.lint_extra(datos)
 
 
-def bloqueos_finales(datos, hallazgos):
+def bloqueos_finales(tipo, datos, hallazgos, ruta_registro):
     """Motivos que impiden una versión final. En borrador pasan a ser avisos."""
     motivos = [str(h) for h in lint.bloqueos(hallazgos)]
     motivos += [f"Pendiente en {r}: {m}" for r, m in entrada.pendientes(datos)]
     if not entrada.humanizer_declarado(datos):
         motivos.append("Falta pasar los textos por la skill humanizer y declarar redaccion.humanizer_aplicado: true")
+    if not entrada.revision_confirmada(datos):
+        motivos.append("Falta confirmar con el usuario la fecha, la versión, la descripción y el autor de esta edición "
+                       "y declarar redaccion.revision_confirmada: true")
+    motivos += registro.problemas(ruta_registro, tipo.seccion_registro(datos))
     return motivos
 
 
@@ -84,15 +89,19 @@ def ejecutar(tipo, argv=None):
     p.add_argument("--borrador", action="store_true", help="admite pendientes y hallazgos; no es versión final")
     p.add_argument("--sobrescribir", action="store_true", help="reemplaza el archivo de salida si existe")
     p.add_argument("--pdf", action="store_true", help="deja también una copia en PDF")
+    p.add_argument("--registro", help="registro de preguntas y respuestas (por defecto, junto al JSON)")
     p.add_argument("--solo-lint", action="store_true", help="revisa el JSON sin crear ningún documento")
     a = p.parse_args(argv)
     try:
         datos = entrada.cargar(a.entrada)
         validar_entrada(tipo, datos)
         hallazgos = revisar(tipo, datos)
-        motivos = bloqueos_finales(datos, hallazgos)
+        ruta_registro = a.registro or registro.ruta_por_defecto(a.entrada)
+        motivos = bloqueos_finales(tipo, datos, hallazgos, ruta_registro)
         _imprimir("Avisos:", [str(h) for h in lint.avisos(hallazgos)])
         if a.solo_lint:
+            r = datos["historial"][-1]
+            print(f"Edición: versión {r['version']}, {r['fecha']}, {r['autor']}. {r['descripcion']}")
             _imprimir("Bloquean la versión final:", motivos)
             print(f"Lint: {len(motivos)} bloqueos, {len(lint.avisos(hallazgos))} avisos")
             return 1 if motivos else 0
